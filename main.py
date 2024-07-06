@@ -240,34 +240,35 @@ def getmaps(input) -> list:
 # You could technically cache matches but it's not really worth it given how few calls it takes
 def api_call(matchlist: list[int]):
     matches_maps = []
-    for match in matchlist:
-        # get stuff
-        match_response = api.match(match, limit=None)
+    with tqdm(total=len(matchlist)) as pbar:
+        for match in matchlist:
+            # get stuff
+            match_response = api.match(match, limit=None)
 
-        # sort into events and users
-        all_events = match_response.events
-        first_id = match_response.events[0].id
-        last_id = match_response.events[-1].id
-        # print(api.match(match, before_id=first_id))
+            # sort into events and users
+            all_events = match_response.events
+            first_id = match_response.events[0].id
+            last_id = match_response.events[-1].id
+            # print(api.match(match, before_id=first_id))
 
-        while True and first_id != match_response.first_event_id:
-            first_response = api.match(match, before_id=first_id)
-            first_events = first_response.events
-            matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in first_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
-            if len(first_events) == 0:
-                break
-            first_id = first_response.events[0].id
-        while True and last_id != match_response.latest_event_id:
-            last_response = api.match(match, after_id=last_id)
-            last_events = last_response.events
-            matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in last_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
-            if len(last_events) == 0:
-                break
-            last_id = last_response.events[-1].id
-        
-        # filter for maps played
-        matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in all_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
-        
+            while True and first_id != match_response.first_event_id:
+                first_response = api.match(match, before_id=first_id)
+                first_events = first_response.events
+                matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in first_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
+                if len(first_events) == 0:
+                    break
+                first_id = first_response.events[0].id
+            while True and last_id != match_response.latest_event_id:
+                last_response = api.match(match, after_id=last_id)
+                last_events = last_response.events
+                matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in last_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
+                if len(last_events) == 0:
+                    break
+                last_id = last_response.events[-1].id
+            
+            # filter for maps played
+            matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in all_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
+            pbar.update(1)
     return matches_maps
 
 # Extract data from object format provided by ossapi
