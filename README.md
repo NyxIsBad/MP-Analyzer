@@ -7,6 +7,7 @@ Necessary Input Files:
 - Create `matches.txt`, input all matches. Can be in any format as long as it follows `.*/id`
 - Create `secrets.txt`. First line is client ID, second is client secret. You will need to get this from osu api
 - Create `teams.csv`. This needs at least 2 columns, 1 for the user ID and the second for the team. You may change the names of the corresponding files in main.py
+- Create `pool.txt`. Put in valid pool maps here.
 
 Other input args:
 - All at the top of main.py

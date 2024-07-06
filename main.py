@@ -19,6 +19,7 @@ csv_columns = ['User ID', 'Team']
 
 # matches file
 matches_file = 'matches.txt'
+pool_file = 'pool.txt'
 # disconnects file
 dc_file = 'disconnects.csv'
 
@@ -72,6 +73,7 @@ class Teams:
         self.teamtoid = {}
         # dict of team name -> teamscores object
         self.teamscores = {}
+        self.maplist = getmaps(pool_file)
 
     # get teams from the team_csv file.
     def load_teams(self, team_csv):
@@ -84,7 +86,7 @@ class Teams:
             self.idtoteam[row[csv_columns[0]]] = row[csv_columns[1]]
             self.teamtoid[row[csv_columns[1]]] = row[csv_columns[0]]
             if row[csv_columns[1]] not in self.teamscores.keys():
-                self.teamscores[row[csv_columns[1]]] = TeamScores(row[csv_columns[1]])
+                self.teamscores[row[csv_columns[1]]] = TeamScores(row[csv_columns[1]], self.maplist)
 
         teamlist = self.get_team_list()
         with tqdm(total=len(teamlist)) as pbar:
@@ -115,6 +117,10 @@ class Teams:
         team = self.get_team(user_id)
         # if the user is not in a team, we don't care about them
         if team is None:
+            print(f"User {user_id} not in a team.")
+            return
+        if map_id not in self.maplist:
+            print(f"Map {map_id} not in pool.")
             return
         self.teamscores[team].add_score(user_id, map_id, score)
     
@@ -125,23 +131,20 @@ class Teams:
 # 1 level lower than Teams
 class TeamScores:
     # initialization
-    def __init__(self, team, players=None):
+    def __init__(self, team, maps, players=None):
         self.team = team
         self.scores = []
-        self.maps = []
+        self.maps = maps
         self.players = players if players else []
+        for map_id in maps:
+            self.scores.append(MapScores(map_id))
     
     # add score method, once again handed off to the MapScores object
     def add_score(self, user_id, map_id, score):
-        if map_id not in self.maps:
-            self.maps.append(map_id)
-            self.scores.append(MapScores(map_id))
-            self.scores[-1].add_score(user_id, score)
-        else:
-            for map in self.scores:
-                if map.get_map() == map_id:
-                    map.add_score(user_id, score)
-                    break
+        for map_item in self.scores:
+            if map_item.get_map() == map_id:
+                map_item.add_score(user_id, score)
+                break
     
     # setters and getters
     def set_players(self, players):
@@ -165,7 +168,7 @@ class TeamScores:
     
     # method for stats later
     def get_performance(self):
-        return [f"{map.get_sum()} - {", ".join(map.get_usernames())}" for map in self.scores]
+        return [f"{map.get_sum()} - {", ".join(map.get_usernames())} on {map.get_map()}" for map in self.scores]
     
     def get_team(self):
         return self.team
@@ -177,7 +180,7 @@ class TeamScores:
 # Last level, has individual maps. Map ID, users, with their scores
 class MapScores:
     # initialization
-    def __init__(self, map_id):
+    def __init__(self, map_id: int):
         self.scores = {}
         self.map = map_id
 
@@ -224,19 +227,47 @@ def getmatches(input) -> list:
     
     return lines
 
+# Get maps from match file. Easy split method
+def getmaps(input) -> list:
+    print("Getting maps...")
+    with open(input, 'r') as f:
+        lines = f.read().splitlines()
+    print("Maps loaded.")
+    lines = [int(line) for line in lines]
+    return lines
+
 # API call to get match data
 # You could technically cache matches but it's not really worth it given how few calls it takes
 def api_call(matchlist: list[int]):
     matches_maps = []
     for match in matchlist:
         # get stuff
-        match_response = api.match(match)
+        match_response = api.match(match, limit=None)
 
         # sort into events and users
         all_events = match_response.events
+        first_id = match_response.events[0].id
+        last_id = match_response.events[-1].id
+        # print(api.match(match, before_id=first_id))
+
+        while True:
+            first_response = api.match(match, before_id=first_id)
+            first_id = first_response.first_event_id
+            first_events = first_response.events
+            matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in first_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
+            if len(first_events) == 0:
+                break
+        while True:
+            last_response = api.match(match, after_id=last_id)
+            last_id = last_response.latest_event_id
+            last_events = last_response.events
+            matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in last_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
+            if len(last_events) == 0:
+                break
         
         # filter for maps played
         matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in all_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
+        
     return matches_maps
 
 # Extract data from object format provided by ossapi
@@ -255,7 +286,7 @@ def get_data(match_data: list[tuple[int, list[ossapi.Score]]], teams: Teams):
         # given that we'll never exceed a few hundred players in any one tournament
         for i, row in data.iterrows():
             teams.add_score(row['User ID'], row['Map'], row['Score'])
-            
+        
     return teams
 
 # get stats by calling methods. This is omegajank because of the way I make it a csv
@@ -265,11 +296,11 @@ def get_stats(teams: Teams):
     for team in teams.get_team_list():
         cur_team = teams.teamscores[team]
         # skip empty teams
-        if len(cur_team.get_scores()) == 0:
+        if cur_team.get_avg() == 0:
             continue
         stats_df.append([team, ', '.join(cur_team.get_players()), cur_team.get_avg(), cur_team.get_sum()]+cur_team.get_performance())
     
-    stats_df = pd.DataFrame(stats_df, columns=['Team', 'Players', 'Average Score', 'Total Score']+[f'Map {i}' for i in range(1, len(stats_df[0])-3)])
+    stats_df = pd.DataFrame(stats_df, columns=['Team', 'Players', 'Average Score', 'Total Score']+teams.maplist)
 
     stats_df.sort_values(by='Average Score', ascending=False, inplace=True)
     stats_df.to_csv('results.csv', index=False, sep='|', encoding='utf-8', float_format='%.2f')
