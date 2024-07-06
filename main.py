@@ -77,6 +77,9 @@ class Teams:
     def load_teams(self, team_csv):
         print("Getting teams...")
         data = pd.read_csv(team_csv, sep=',', header=0, keep_default_na=False)
+        # I'm aware that iterrows is a horrible way of treating pandas dataframes
+        # However, I choose to believe that the dataset is small enough that it doesn't matter
+        # given that we'll never exceed a few hundred players in any one tournament
         for i, row in data.iterrows():
             self.idtoteam[row[csv_columns[0]]] = row[csv_columns[1]]
             self.teamtoid[row[csv_columns[1]]] = row[csv_columns[0]]
@@ -247,6 +250,9 @@ def get_data(match_data: list[tuple[int, list[ossapi.Score]]], teams: Teams):
     # add disconnect scores
     with open(dc_file, 'r') as f:
         data = pd.read_csv(f, sep=',', header=0, keep_default_na=False)
+        # I'm aware that iterrows is a horrible way of treating pandas dataframes
+        # However, I choose to believe that the dataset is small enough that it doesn't matter
+        # given that we'll never exceed a few hundred players in any one tournament
         for i, row in data.iterrows():
             teams.add_score(row['User ID'], row['Map'], row['Score'])
             
