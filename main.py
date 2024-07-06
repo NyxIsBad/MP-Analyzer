@@ -168,7 +168,7 @@ class TeamScores:
     
     # method for stats later
     def get_performance(self):
-        return [f"{map.get_sum()} - {", ".join(map.get_usernames())} on {map.get_map()}" for map in self.scores]
+        return [f"{map.get_sum()} - {", ".join(map.get_usernames())}" for map in self.scores]
     
     def get_team(self):
         return self.team
@@ -250,20 +250,20 @@ def api_call(matchlist: list[int]):
         last_id = match_response.events[-1].id
         # print(api.match(match, before_id=first_id))
 
-        while True:
+        while True and first_id != match_response.first_event_id:
             first_response = api.match(match, before_id=first_id)
-            first_id = first_response.first_event_id
             first_events = first_response.events
             matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in first_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
             if len(first_events) == 0:
                 break
-        while True:
+            first_id = first_response.events[0].id
+        while True and last_id != match_response.latest_event_id:
             last_response = api.match(match, after_id=last_id)
-            last_id = last_response.latest_event_id
             last_events = last_response.events
             matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in last_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
             if len(last_events) == 0:
                 break
+            last_id = last_response.events[-1].id
         
         # filter for maps played
         matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in all_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
