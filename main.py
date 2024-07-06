@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from ossapi import Ossapi
 from tqdm import tqdm
+import time
 # ----------------------------------------------------------------------------------------------- #
 # global variables you have to set
 # ----------------------------------------------------------------------------------------------- #
@@ -26,9 +27,13 @@ dc_file = 'disconnects.csv'
 # ----------------------------------------------------------------------------------------------- #
 # id -> user object
 class UserCache:
+    # initialization, with expiry time
     def __init__(self):
         self.cache = {}
+        self.last_save = time.time()
     
+    # user get. We cache the object because the user object doesn't change too often
+    # and would be the most api intensive element otherwise
     def get(self, user_id):
         if user_id in self.cache:
             return self.cache[user_id]
@@ -37,25 +42,38 @@ class UserCache:
             self.cache[user_id] = user
             return user
     
+    # simple cache save operation
     def save(self):
         with open('user_cache.pkl', 'wb') as f:
-            pickle.dump(self.cache, f)
+            pickle.dump((self.cache, self.last_save), f)
             f.close()
 
+    # load cache from file
     def load(self):
         try:
+            # retrieve the cache
             with open('user_cache.pkl', 'rb') as f:
-                self.cache = pickle.load(f)
+                self.cache, self.last_save = pickle.load(f)
+                # if it's been a week since the last save, clear cache
+                # it will be regenerated on the next run
+                if time.time() - self.last_save > 60*60*24*7:
+                    self.cache = {}
                 f.close()
         except FileNotFoundError: # no cache
             pass
+            # passing leaves cache empty, which means we regenerate and save it later
 
+# teams is a list of all teams' scores and their player references.
 class Teams:
+    # initialize
     def __init__(self):
+        # references, this can be implemented much better, but dicts are fast lol
         self.idtoteam = {}
         self.teamtoid = {}
+        # dict of team name -> teamscores object
         self.teamscores = {}
 
+    # get teams from the team_csv file.
     def load_teams(self, team_csv):
         print("Getting teams...")
         data = pd.read_csv(team_csv, sep=',', header=0, keep_default_na=False)
@@ -72,6 +90,7 @@ class Teams:
                 pbar.update(1)
         print("Teams loaded.")
 
+    # get methods
     def get_team(self, user_id):
         if user_id not in self.idtoteam.keys():
             return None
@@ -88,22 +107,28 @@ class Teams:
     def get_team_list(self):
         return list(self.teamscores.keys())
     
+    # add score to the team. we do this by handing it off to the team object
     def add_score(self, user_id, map_id, score):
         team = self.get_team(user_id)
+        # if the user is not in a team, we don't care about them
         if team is None:
             return
         self.teamscores[team].add_score(user_id, map_id, score)
-        
+    
+    # debug print method
     def __str__(self):
         return 'Teams OBJ:' + str(self.idtoteam) +'\n'.join([f"{team.get_team()}: {[str(obj) for obj in team.get_scores()]}" for team in self.teamscores.values()])
 
+# 1 level lower than Teams
 class TeamScores:
+    # initialization
     def __init__(self, team, players=None):
         self.team = team
         self.scores = []
         self.maps = []
         self.players = players if players else []
     
+    # add score method, once again handed off to the MapScores object
     def add_score(self, user_id, map_id, score):
         if map_id not in self.maps:
             self.maps.append(map_id)
@@ -115,6 +140,7 @@ class TeamScores:
                     map.add_score(user_id, score)
                     break
     
+    # setters and getters
     def set_players(self, players):
         self.players = players
 
@@ -134,20 +160,29 @@ class TeamScores:
             return 0
         return np.mean([map.get_sum() for map in self.scores])
     
+    # method for stats later
+    def get_performance(self):
+        return [f"{map.get_sum()} - {", ".join(map.get_usernames())}" for map in self.scores]
+    
     def get_team(self):
         return self.team
     
+    # debug print method
     def __str__(self):
         return f"{self.team}: {str(self.scores)}"
 
+# Last level, has individual maps. Map ID, users, with their scores
 class MapScores:
+    # initialization
     def __init__(self, map_id):
         self.scores = {}
         self.map = map_id
 
+    # add score method
     def add_score(self, user_id, score):
         self.scores[user_id] = score
     
+    # getters
     def get_scores(self):
         return self.scores
     
@@ -159,16 +194,22 @@ class MapScores:
             return 0
         return sum(self.scores.values())
     
+    # this is the reason why user cache is relevant. Note that this method is only used for loading teams
+    def get_usernames(self):
+        return [cache.get(user_id) for user_id in self.scores.keys()]
+    
     def get_avg(self):
         if len(self.scores) == 0:
             return 0
         return np.mean(list(self.scores.values()))
     
+    # Debug print method
     def __str__(self):
         return f'Map {self.map}: ' + str(self.scores)
 # ----------------------------------------------------------------------------------------------- #
 # match stuff
 # ----------------------------------------------------------------------------------------------- #
+# Get ids from match file. Easy split method
 def getmatches(input) -> list:
     print("Getting matches...")
     with open(input, 'r') as f:
@@ -180,6 +221,8 @@ def getmatches(input) -> list:
     
     return lines
 
+# API call to get match data
+# You could technically cache matches but it's not really worth it given how few calls it takes
 def api_call(matchlist: list[int]):
     matches_maps = []
     for match in matchlist:
@@ -193,6 +236,7 @@ def api_call(matchlist: list[int]):
         matches_maps.append([(event.game.beatmap_id, event.game.scores) for event in all_events if event.detail.type == ossapi.MatchEventType.OTHER and event.game.scores])
     return matches_maps
 
+# Extract data from object format provided by ossapi
 def get_data(match_data: list[tuple[int, list[ossapi.Score]]], teams: Teams):
     # process api scores
     for event in match_data:
@@ -208,20 +252,23 @@ def get_data(match_data: list[tuple[int, list[ossapi.Score]]], teams: Teams):
             
     return teams
 
+# get stats by calling methods. This is omegajank because of the way I make it a csv
 def get_stats(teams: Teams):
     stats_df = []
-
+    
     for team in teams.get_team_list():
         cur_team = teams.teamscores[team]
         # skip empty teams
         if len(cur_team.get_scores()) == 0:
             continue
-        stats_df.append([team, ', '.join(cur_team.get_players()), cur_team.get_avg(), cur_team.get_sum()])
+        stats_df.append([team, ', '.join(cur_team.get_players()), cur_team.get_avg(), cur_team.get_sum()]+cur_team.get_performance())
     
-    stats_df = pd.DataFrame(stats_df, columns=['Team', 'Players', 'Average Score', 'Total Score'])
+    stats_df = pd.DataFrame(stats_df, columns=['Team', 'Players', 'Average Score', 'Total Score']+[f'Map {i}' for i in range(1, len(stats_df[0])-3)])
 
     stats_df.sort_values(by='Average Score', ascending=False, inplace=True)
     stats_df.to_csv('results.csv', index=False, sep='|', encoding='utf-8', float_format='%.2f')
+
+    
 
 # ----------------------------------------------------------------------------------------------- #
 # driver code
@@ -237,7 +284,6 @@ def main():
 
     cache.load()
     teams.load_teams(csv_file)
-    cache.save()
     
     # start processing
     matches = getmatches(matches_file)
@@ -253,6 +299,7 @@ def main():
     print("Matches processed.")
     # do stats
     get_stats(teams)
+    cache.save()
     # end of program
 
 if __name__ == "__main__":
