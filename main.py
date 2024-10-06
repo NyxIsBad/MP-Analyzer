@@ -5,6 +5,7 @@ import numpy as np
 from ossapi import Ossapi
 from tqdm import tqdm
 import time
+
 # ----------------------------------------------------------------------------------------------- #
 # global variables you have to set
 # ----------------------------------------------------------------------------------------------- #
@@ -78,7 +79,7 @@ class Teams:
     # get teams from the team_csv file.
     def load_teams(self, team_csv):
         print("Getting teams...")
-        data = pd.read_csv(team_csv, sep=',', header=0, keep_default_na=False)
+        data = pd.read_csv(team_csv, sep='|', header=0, keep_default_na=False)
         # I'm aware that iterrows is a horrible way of treating pandas dataframes
         # However, I choose to believe that the dataset is small enough that it doesn't matter
         # given that we'll never exceed a few hundred players in any one tournament
@@ -168,7 +169,7 @@ class TeamScores:
     
     # method for stats later
     def get_performance(self):
-        return [f"{map.get_sum()} - {", ".join(map.get_usernames())}" for map in self.scores]
+        return [f"{map.get_sum()} - {', '.join(map.get_usernames())}" for map in self.scores]
     
     def get_team(self):
         return self.team
@@ -249,7 +250,6 @@ def api_call(matchlist: list[int]):
             all_events = match_response.events
             first_id = match_response.events[0].id
             last_id = match_response.events[-1].id
-            # print(api.match(match, before_id=first_id))
 
             while True and first_id != match_response.first_event_id:
                 first_response = api.match(match, before_id=first_id)
@@ -337,6 +337,7 @@ def main():
     print("Matches processed.")
     # do stats
     get_stats(teams)
+    print("Stats saved.")
     cache.save()
     # end of program
 
