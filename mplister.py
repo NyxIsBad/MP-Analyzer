@@ -10,8 +10,8 @@ with open('secrets.txt', 'r') as tokens_file:
     tokens_file.close()
 api = Ossapi(client_id, client_secret)
 
-start = 115738000
-end = 115765000
+start = 115770287
+end =   115777325
 
 def list_matches_chunk(output_file, start, end):
     with open(output_file, 'a', encoding='utf-8') as outfile:  # 'a' mode to append to the same file

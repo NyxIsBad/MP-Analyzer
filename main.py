@@ -24,6 +24,9 @@ pool_file = 'pool.txt'
 # disconnects file
 dc_file = 'disconnects.csv'
 
+# create api
+api = Ossapi(client_id, client_secret)
+
 # ----------------------------------------------------------------------------------------------- #
 # classes
 # ----------------------------------------------------------------------------------------------- #
@@ -37,7 +40,8 @@ class UserCache:
     # user get. We cache the object because the user object doesn't change too often
     # and would be the most api intensive element otherwise
     def get(self, user_id):
-        if user_id in self.cache:
+        user_id = str(user_id)
+        if user_id in self.cache.keys():
             return self.cache[user_id]
         else:
             user = api.user(user_id, key=ossapi.UserLookupKey.ID).username
@@ -55,10 +59,13 @@ class UserCache:
         try:
             # retrieve the cache
             with open('user_cache.pkl', 'rb') as f:
-                self.cache, self.last_save = pickle.load(f)
+                self.cache, savetime = pickle.load(f)
+                with open('debug.txt', 'a') as debug:
+                    for user_id, username in self.cache.items():
+                        debug.write(f"{user_id}: {username}\n")
                 # if it's been a week since the last save, clear cache
                 # it will be regenerated on the next run
-                if time.time() - self.last_save > 60*60*24*7:
+                if time.time() - savetime > 60*60*24*7:
                     self.cache = {}
                 f.close()
         except FileNotFoundError: # no cache
@@ -312,35 +319,26 @@ def get_stats(teams: Teams):
 # driver code
 # ----------------------------------------------------------------------------------------------- #
 
-# create api
-api = Ossapi(client_id, client_secret)
-# cache things
+teams = Teams()
+
 cache = UserCache()
+cache.load()
 
-def main():
-    teams = Teams()
+teams.load_teams(csv_file)
 
-    cache.load()
-    teams.load_teams(csv_file)
-    
-    # start processing
-    matches = getmatches(matches_file)
-    
-    match_data = api_call(matches)
+# start processing
+matches = getmatches(matches_file)
 
-    print("Processing matches...")
-    with tqdm(total=len(match_data)) as pbar:
-        for match in match_data:
-            
-            get_data(match, teams)
-            pbar.update(1)
-    print("Matches processed.")
-    # do stats
-    get_stats(teams)
-    print("Stats saved.")
-    cache.save()
-    # end of program
+match_data = api_call(matches)
 
-if __name__ == "__main__":
-    main()
-
+print("Processing matches...")
+with tqdm(total=len(match_data)) as pbar:
+    for match in match_data:
+        get_data(match, teams)
+        pbar.update(1)
+print("Matches processed.")
+# do stats
+get_stats(teams)
+print("Stats saved.")
+cache.save()
+# end of program
